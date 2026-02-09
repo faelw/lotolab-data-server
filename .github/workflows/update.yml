@@ -1,0 +1,32 @@
+name: Update Lottery Data
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Roda todo dia à meia-noite
+  workflow_dispatch: # Permite rodar manualmente no botão do site
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run Scraper
+        run: python main.py
+
+      - name: Commit and Push
+        run: |
+          git config --global user.name "LotoLab Bot"
+          git config --global user.email "bot@lotolab.com"
+          git add *.json
+          git commit -m "Update lottery results [skip ci]" || exit 0
+          git push
