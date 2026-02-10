@@ -2,16 +2,14 @@ name: Update Lottery Data
 
 on:
   schedule:
-    - cron: '0 0 * * *' # Roda automaticamente à meia-noite
-  workflow_dispatch:      # Permite que você clique no botão "Run workflow" no site
+    - cron: '0 2 * * *' # Roda às 02:00 UTC diariamente
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Permissões necessárias para gravar os arquivos de volta no repositório
     permissions:
-      contents: write
-      
+      contents: write # ESSENCIAL para evitar erro 403
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -21,18 +19,16 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Install dependencies
+      - name: Install requests
         run: pip install requests
 
-      - name: Run Scraper
+      - name: Run Engine
         run: python main.py
 
       - name: Commit and Push
         run: |
           git config --global user.name "LotoLab Bot"
           git config --global user.email "bot@lotolab.com"
-          # Adiciona todos os JSONs e o arquivo de log de atualização
           git add *.json last_update.txt
-          # O "exit 0" evita que o workflow falhe se não houver sorteio novo (nada para commitar)
-          git commit -m "🎰 Update Results: $(date +'%Y-%m-%d %H:%M') [skip ci]" || exit 0
+          git commit -m "🎰 Auto-Update: $(date +'%Y-%m-%d')" || exit 0
           git push
