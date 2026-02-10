@@ -1,8 +1,11 @@
 import requests
 import json
 
-# URLs Oficiais (Socrata API)
+# URLs ATUALIZADAS E TESTADAS (Socrata API)
+# Powerball: https://data.ny.gov/Government/Lottery-Powerball-Winning-Numbers-Beginning-2010/d6yy-mqv8
 PB_URL = "https://data.ny.gov/resource/d6yy-mqv8.json?$limit=100&$order=draw_date DESC"
+
+# Mega Millions: https://data.ny.gov/Government/Lottery-Mega-Millions-Winning-Numbers-Beginning-20/5xaw-6ayf
 MM_URL = "https://data.ny.gov/resource/5xaw-6ayf.json?$limit=100&$order=draw_date DESC"
 
 def format_payouts(game_type):
@@ -13,7 +16,10 @@ def format_payouts(game_type):
 def process_game(url, game_type):
     print(f"Processando {game_type}...")
     try:
-        response = requests.get(url, timeout=20)
+        # User-agent para evitar ser bloqueado pelo servidor do governo
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers, timeout=30)
+        
         if response.status_code != 200:
             print(f"Erro na API {game_type}: {response.status_code}")
             return
@@ -23,7 +29,7 @@ def process_game(url, game_type):
 
         for item in raw_data:
             try:
-                # Extração segura dos números
+                # Pegar números (A Powerball as vezes usa campos diferentes)
                 winning_numbers = item.get('winning_numbers', '')
                 if not winning_numbers: continue
                 
@@ -34,13 +40,16 @@ def process_game(url, game_type):
                     whites = [int(n) for n in parts[:5]]
                     special = int(parts[5])
                 else:
-                    # Fallback para Mega Millions caso a Mega Ball esteja em outro campo
+                    # Se vier menos de 6, tenta o campo da Mega Ball
                     whites = [int(n) for n in parts]
                     special = int(item.get('mega_ball', 0))
 
-                # Limpeza do Multiplicador (Ex: "3" ou "3x" vira 3)
+                # Multiplicador (Limpeza total)
                 mult_raw = str(item.get('multiplier', '1')).lower().replace('x', '').strip()
-                multiplier = int(float(mult_raw)) if mult_raw and mult_raw != 'none' else 1
+                try:
+                    multiplier = int(float(mult_raw))
+                except:
+                    multiplier = 1
 
                 obj = {
                     "d": item.get('draw_date', '').split('T')[0],
@@ -51,10 +60,9 @@ def process_game(url, game_type):
                 }
                 processed_list.append(obj)
             except:
-                continue # Pula sorteios com erro de formatação
+                continue 
 
         # --- SALVAR ARQUIVOS ---
-        # 1. Recentes (10 com Payouts)
         recent = []
         for item in processed_list[:10]:
             temp = item.copy()
@@ -64,7 +72,6 @@ def process_game(url, game_type):
         with open(f'{game_type}_recent.json', 'w') as f:
             json.dump(recent, f, indent=2)
 
-        # 2. Histórico (Sem Payouts)
         with open(f'{game_type}_history.json', 'w') as f:
             json.dump(processed_list, f, indent=2)
             
