@@ -1,82 +1,159 @@
 import requests
 import json
+import os
+from datetime import datetime
 
-# NOVAS URLs OFICIAIS (TESTADAS)
-# Powerball: dataset d6yy-mqv8
-PB_URL = "https://data.ny.gov/resource/d6yy-mqv8.json?$limit=100&$order=draw_date DESC"
-# Mega Millions: dataset 5xaw-6ayf
-MM_URL = "https://data.ny.gov/resource/5xaw-6ayf.json?$limit=100&$order=draw_date DESC"
+# ==========================================
+# CONFIG
+# ==========================================
+PB_URL = "https://data.ny.gov/resource/d6yy-mqv8.json?$limit=1000&$order=draw_date DESC"
+MM_URL = "https://data.ny.gov/resource/5xaw-6ayf.json?$limit=1000&$order=draw_date DESC"
 
+HEADERS = {'User-Agent': 'LotoLab-Pro/2.0'}
+
+# ==========================================
+# PAYOUTS PADRÃO
+# ==========================================
 def format_payouts(game_type):
-    """Padrão de rateio LotoLab"""
     if game_type == "pb":
-        return {"5+1": "Jackpot", "5+0": "$1M", "4+1": "$50k", "4+0": "$100"}
-    return {"5+1": "Jackpot", "5+0": "$1M", "4+1": "$10k", "4+0": "$500"}
+        return {
+            "5+1": "Jackpot",
+            "5+0": "$1M",
+            "4+1": "$50k",
+            "4+0": "$100"
+        }
+    else:
+        return {
+            "5+1": "Jackpot",
+            "5+0": "$1M",
+            "4+1": "$10k",
+            "4+0": "$500"
+        }
 
+# ==========================================
+# SALVAR JSON SEGURO
+# ==========================================
+def save_json(filename, data):
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+# ==========================================
+# PROCESSADOR PRINCIPAL
+# ==========================================
 def process_game(url, game_type):
-    print(f"Lendo dados de {game_type.upper()}...")
+    print(f"\n📡 Baixando {game_type.upper()} ...")
+
     try:
-        # Headers para evitar bloqueio de robôs
-        headers = {'User-Agent': 'LotoLab-Bot/1.0'}
-        response = requests.get(url, headers=headers, timeout=30)
-        
+        response = requests.get(url, headers=HEADERS, timeout=30)
+
         if response.status_code != 200:
-            print(f"Erro na API {game_type}: {response.status_code}")
+            print(f"❌ Erro API {game_type}: {response.status_code}")
             return
-        
+
         raw_data = response.json()
-        processed_list = []
+        processed = []
+        seen_dates = set()
 
         for item in raw_data:
             try:
-                draw_date = item.get('draw_date', '').split('T')[0]
-                winning_numbers = item.get('winning_numbers', '')
-                if not winning_numbers: continue
-                
-                parts = winning_numbers.split()
-                
-                # Tratamento robusto para os dois jogos
-                if len(parts) >= 6:
-                    whites = [int(n) for n in parts[:5]]
-                    special = int(parts[5])
+                draw_date = item.get("draw_date", "").split("T")[0]
+                if not draw_date or draw_date in seen_dates:
+                    continue
+
+                seen_dates.add(draw_date)
+
+                # ---------------------------
+                # NUMEROS PRINCIPAIS
+                # ---------------------------
+                winning_numbers = item.get("winning_numbers", "")
+                if not winning_numbers:
+                    continue
+
+                whites = [int(n) for n in winning_numbers.split()]
+
+                # ---------------------------
+                # BOLA ESPECIAL
+                # ---------------------------
+                if game_type == "pb":
+                    special = int(item.get("powerball", 0))
                 else:
-                    # Caso a Mega Ball venha em campo separado (comum na API MM)
-                    whites = [int(n) for n in parts]
-                    special = int(item.get('mega_ball', 0))
+                    special = int(item.get("mega_ball", 0))
 
-                # Multiplicador
-                m_raw = str(item.get('multiplier', '1')).lower().replace('x', '').strip()
-                multiplier = int(float(m_raw)) if m_raw.isdigit() else 1
+                # ---------------------------
+                # MULTIPLICADOR
+                # ---------------------------
+                if game_type == "pb":
+                    m_raw = str(item.get("power_play", "1")).lower().replace("x", "").strip()
+                else:
+                    m_raw = str(item.get("multiplier", "1")).lower().replace("x", "").strip()
 
-                # Formato Compacto (d, w, s, m, t)
-                processed_list.append({
+                multiplier = int(m_raw) if m_raw.isdigit() else 1
+
+                processed.append({
                     "d": draw_date,
                     "w": whites,
                     "s": special,
                     "m": multiplier,
                     "t": 0 if game_type == "pb" else 1
                 })
-            except Exception as e:
+
+            except Exception:
                 continue
 
-        # SALVANDO ARQUIVOS
-        if processed_list:
-            # 1. Recentes (10 com Payouts)
-            recent = [dict(item, p=format_payouts(game_type)) for item in processed_list[:10]]
-            with open(f'{game_type}_recent.json', 'w') as f:
-                json.dump(recent, f, indent=2)
+        # ----------------------------------
+        # ORDENA POR DATA
+        # ----------------------------------
+        processed.sort(key=lambda x: x["d"], reverse=True)
 
-            # 2. Histórico (Sem Payouts)
-            with open(f'{game_type}_history.json', 'w') as f:
-                json.dump(processed_list, f, indent=2)
-            
-            print(f"✅ Arquivos de {game_type} atualizados.")
-        else:
-            print(f"⚠️ Nenhum dado processado para {game_type}.")
+        if not processed:
+            print(f"⚠️ Nenhum dado válido {game_type}")
+            return
+
+        # ----------------------------------
+        # RECENTES COM PAYOUT
+        # ----------------------------------
+        recent = [
+            dict(item, p=format_payouts(game_type))
+            for item in processed[:10]
+        ]
+
+        # ----------------------------------
+        # SALVAR
+        # ----------------------------------
+        save_json(f"{game_type}_history.json", processed)
+        save_json(f"{game_type}_recent.json", recent)
+
+        print(f"✅ {game_type.upper()} OK")
+        print(f"   concursos: {len(processed)}")
+        print(f"   ultimo: {processed[0]['d']}")
 
     except Exception as e:
-        print(f"❌ Erro fatal {game_type}: {e}")
+        print(f"💥 Erro fatal {game_type}: {e}")
 
+# ==========================================
+# AUTO UPDATE DIÁRIO
+# ==========================================
+def save_last_update():
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    with open("last_update.txt", "w") as f:
+        f.write(now)
+
+# ==========================================
+# MAIN
+# ==========================================
 if __name__ == "__main__":
+    print("\n==============================")
+    print("🎰 LOTOLAB DATA ENGINE v2")
+    print("==============================")
+
     process_game(PB_URL, "pb")
     process_game(MM_URL, "mm")
+
+    save_last_update()
+
+    print("\n📁 Arquivos gerados:")
+    print("pb_history.json")
+    print("pb_recent.json")
+    print("mm_history.json")
+    print("mm_recent.json")
+    print("\n🚀 Pronto para IA / App / API")
