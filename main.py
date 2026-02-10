@@ -1,8 +1,9 @@
 import requests
 import json
+import os
 from datetime import datetime
 
-# URLs OFICIAIS ATUALIZADAS (Portal de Dados de NY)
+# URLs OFICIAIS ATUALIZADAS (NY Open Data)
 PB_URL = "https://data.ny.gov/resource/d6yy-mqv8.json?$limit=1000&$order=draw_date DESC"
 MM_URL = "https://data.ny.gov/resource/5xaw-6ayf.json?$limit=1000&$order=draw_date DESC"
 
@@ -14,11 +15,11 @@ def format_payouts(game_type):
     return {"5+1": "Jackpot", "5+0": "$1M", "4+1": "$10k", "4+0": "$500"}
 
 def process_game(url, game_type):
-    print(f"\n📡 Lendo {game_type.upper()}...")
+    print(f"\n📡 Conectando ao servidor: {game_type.upper()}...")
     try:
         response = requests.get(url, headers=HEADERS, timeout=30)
         if response.status_code != 200:
-            print(f"❌ Erro {game_type}: {response.status_code}")
+            print(f"❌ Erro na API {game_type}: {response.status_code}")
             return
 
         raw_data = response.json()
@@ -27,53 +28,48 @@ def process_game(url, game_type):
 
         for item in raw_data:
             try:
-                date = item.get("draw_date", "").split("T")[0]
-                if not date or date in seen_dates: continue
+                draw_date = item.get("draw_date", "").split("T")[0]
+                if not draw_date or draw_date in seen_dates: continue
 
-                # Extração Inteligente de Números
-                raw_nums = item.get("winning_numbers", "").split()
-                if not raw_nums: continue
+                # Captura números brancos
+                win_nums = item.get("winning_numbers", "")
+                if not win_nums: continue
+                whites = [int(n) for n in win_nums.split()]
 
-                # Identificar Bola Especial (Powerball/Mega Ball)
-                # Às vezes vem na string 'winning_numbers', às vezes em campo separado
-                if len(raw_nums) >= 6:
-                    whites = [int(n) for n in raw_nums[:5]]
-                    special = int(raw_nums[5])
+                # Captura bola especial (Lógica diferente para cada jogo)
+                if game_type == "pb":
+                    special = int(item.get("powerball", 0))
+                    m_raw = str(item.get("power_play", "1"))
                 else:
-                    whites = [int(n) for n in raw_nums]
-                    # Busca campo secundário se a string principal estiver curta
-                    special = int(item.get("powerball") or item.get("mega_ball") or 0)
+                    special = int(item.get("mega_ball", 0))
+                    m_raw = str(item.get("multiplier", "1"))
 
-                # Multiplicador
-                m_val = str(item.get("power_play") or item.get("multiplier") or "1")
-                multiplier = int(m_val.lower().replace("x", "").strip())
+                # Limpeza do multiplicador
+                m_clean = m_raw.lower().replace("x", "").strip()
+                multiplier = int(m_clean) if m_clean.isdigit() else 1
 
                 processed.append({
-                    "d": date,
+                    "d": draw_date,
                     "w": whites,
                     "s": special,
                     "m": multiplier,
                     "t": 0 if game_type == "pb" else 1
                 })
-                seen_dates.add(date)
-
+                seen_dates.add(draw_date)
             except: continue
 
-        # Salvar Arquivos
         if processed:
             processed.sort(key=lambda x: x["d"], reverse=True)
-            # Recent (10 com Payout)
-            recent = [dict(item, p=format_payouts(game_type)) for item in processed[:10]]
-            
-            with open(f"{game_type}_history.json", "w") as f:
+            # Salva Histórico Completo
+            with open(f"{game_type}_history.json", "w", encoding="utf-8") as f:
                 json.dump(processed, f, indent=2)
-            with open(f"{game_type}_recent.json", "w") as f:
+            # Salva Recentes (10 com prêmios)
+            recent = [dict(item, p=format_payouts(game_type)) for item in processed[:10]]
+            with open(f"{game_type}_recent.json", "w", encoding="utf-8") as f:
                 json.dump(recent, f, indent=2)
-            
-            print(f"✅ {game_type.upper()} OK: {len(processed)} registros.")
-
+            print(f"✅ {game_type.upper()} OK: {len(processed)} sorteios processados.")
     except Exception as e:
-        print(f"💥 Falha fatal {game_type}: {e}")
+        print(f"💥 Erro fatal em {game_type}: {e}")
 
 if __name__ == "__main__":
     process_game(PB_URL, "pb")
