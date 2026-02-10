@@ -1,91 +1,78 @@
 import requests
 import json
 
-# URLs oficiais (API Socrata - Resultados de NY que servem para todo os EUA)
-# Pegamos os últimos 100 para ter um histórico bom para o Analytics
+# URLs Oficiais (Socrata API)
 PB_URL = "https://data.ny.gov/resource/d6yy-mqv8.json?$limit=100&$order=draw_date DESC"
 MM_URL = "https://data.ny.gov/resource/5xaw-6ayf.json?$limit=100&$order=draw_date DESC"
 
 def format_payouts(game_type):
-    """Retorna a estrutura de prêmios padrão (Rateio)"""
     if game_type == "pb":
-        return {
-            "Grand Prize": "Jackpot",
-            "Match 5 + 0": "$1,000,000",
-            "Match 4 + 1": "$50,000",
-            "Match 4 + 0": "$100",
-            "Match 3 + 1": "$100"
-        }
-    else:
-        return {
-            "Jackpot": "Grand Prize",
-            "Match 5 + 0": "$1,000,000",
-            "Match 4 + MB": "$10,000",
-            "Match 4 + 0": "$500",
-            "Match 3 + MB": "$200"
-        }
+        return {"5+1": "Jackpot", "5+0": "$1M", "4+1": "$50k", "4+0": "$100"}
+    return {"5+1": "Jackpot", "5+0": "$1M", "4+1": "$10k", "4+0": "$500"}
 
 def process_game(url, game_type):
-    print(f"Buscando dados de: {game_type.upper()}...")
-    response = requests.get(url)
-    
-    if response.status_code != 200:
-        print(f"Erro ao acessar API: {response.status_code}")
-        return
+    print(f"Processando {game_type}...")
+    try:
+        response = requests.get(url, timeout=20)
+        if response.status_code != 200:
+            print(f"Erro na API {game_type}: {response.status_code}")
+            return
+        
+        raw_data = response.json()
+        processed_list = []
 
-    raw_data = response.json()
-    processed_list = []
+        for item in raw_data:
+            try:
+                # Extração segura dos números
+                winning_numbers = item.get('winning_numbers', '')
+                if not winning_numbers: continue
+                
+                parts = winning_numbers.split()
+                
+                # Para Powerball e Mega Millions padrão (5 brancas + 1 especial)
+                if len(parts) >= 6:
+                    whites = [int(n) for n in parts[:5]]
+                    special = int(parts[5])
+                else:
+                    # Fallback para Mega Millions caso a Mega Ball esteja em outro campo
+                    whites = [int(n) for n in parts]
+                    special = int(item.get('mega_ball', 0))
 
-    for item in raw_data:
-        try:
-            # Tratamento específico para Mega Millions (campos podem variar na API)
-            winning_numbers = item.get('winning_numbers', '')
-            mega_ball = item.get('mega_ball', None)
+                # Limpeza do Multiplicador (Ex: "3" ou "3x" vira 3)
+                mult_raw = str(item.get('multiplier', '1')).lower().replace('x', '').strip()
+                multiplier = int(float(mult_raw)) if mult_raw and mult_raw != 'none' else 1
+
+                obj = {
+                    "d": item.get('draw_date', '').split('T')[0],
+                    "w": whites,
+                    "s": special,
+                    "m": multiplier,
+                    "t": 0 if game_type == "pb" else 1
+                }
+                processed_list.append(obj)
+            except:
+                continue # Pula sorteios com erro de formatação
+
+        # --- SALVAR ARQUIVOS ---
+        # 1. Recentes (10 com Payouts)
+        recent = []
+        for item in processed_list[:10]:
+            temp = item.copy()
+            temp["p"] = format_payouts(game_type)
+            recent.append(temp)
+        
+        with open(f'{game_type}_recent.json', 'w') as f:
+            json.dump(recent, f, indent=2)
+
+        # 2. Histórico (Sem Payouts)
+        with open(f'{game_type}_history.json', 'w') as f:
+            json.dump(processed_list, f, indent=2)
             
-            nums = winning_numbers.split()
-            
-            if not nums: continue
+        print(f"Sucesso: Arquivos de {game_type} criados.")
 
-            # Se for Mega Millions e a Mega Ball vier num campo separado
-            if game_type == "mm" and mega_ball:
-                whites = [int(n) for n in nums]
-                special = int(mega_ball)
-            else:
-                # Padrão Powerball ou MM com tudo na mesma string
-                whites = [int(n) for n in nums[:-1]]
-                special = int(nums[-1])
-
-            # Criando o objeto no padrão comprimido LotoLab
-            obj = {
-                "d": item.get('draw_date', '').split('T')[0], # Data
-                "w": whites,                                  # White Balls
-                "s": special,                                 # Special Ball
-                "m": int(item.get('multiplier', '1').lower().replace('x', '')), # Multiplier
-                "t": 0 if game_type == "pb" else 1            # Type (0=PB, 1=MM)
-            }
-            processed_list.append(obj)
-        except Exception as e:
-            print(f"Erro ao processar sorteio: {e}")
-
-    # --- 1. GERAR ARQUIVO DETALHADO (Últimos 10 com Rateio) ---
-    recent_data = []
-    for i, item in enumerate(processed_list[:10]):
-        # Adiciona o campo de rateio 'p' apenas nos 10 recentes
-        item_with_payout = item.copy()
-        item_with_payout["p"] = format_payouts(game_type)
-        recent_data.append(item_with_payout)
-    
-    with open(f'{game_type}_recent.json', 'w') as f:
-        json.dump(recent_data, f, indent=2)
-
-    # --- 2. GERAR ARQUIVO HISTÓRICO (Resumido para Analytics) ---
-    # Aqui usamos a lista original (sem o campo 'p')
-    with open(f'{game_type}_history.json', 'w') as f:
-        json.dump(processed_list, f, indent=2)
-
-    print(f"Arquivos para {game_type} gerados!")
+    except Exception as e:
+        print(f"Erro fatal no processamento de {game_type}: {e}")
 
 if __name__ == "__main__":
     process_game(PB_URL, "pb")
     process_game(MM_URL, "mm")
-    print("\nAtualização concluída com sucesso!")
