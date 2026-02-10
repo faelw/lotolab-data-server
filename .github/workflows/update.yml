@@ -2,12 +2,16 @@ name: Update Lottery Data
 
 on:
   schedule:
-    - cron: '0 0 * * *' # Roda todo dia à meia-noite
-  workflow_dispatch: # Permite rodar manualmente no botão do site
+    - cron: '0 0 * * *' # Roda automaticamente à meia-noite
+  workflow_dispatch:      # Permite que você clique no botão "Run workflow" no site
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Permissões necessárias para gravar os arquivos de volta no repositório
+    permissions:
+      contents: write
+      
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -27,6 +31,8 @@ jobs:
         run: |
           git config --global user.name "LotoLab Bot"
           git config --global user.email "bot@lotolab.com"
-          git add *.json
-          git commit -m "Update lottery results [skip ci]" || exit 0
+          # Adiciona todos os JSONs e o arquivo de log de atualização
+          git add *.json last_update.txt
+          # O "exit 0" evita que o workflow falhe se não houver sorteio novo (nada para commitar)
+          git commit -m "🎰 Update Results: $(date +'%Y-%m-%d %H:%M') [skip ci]" || exit 0
           git push
