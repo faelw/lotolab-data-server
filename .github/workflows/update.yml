@@ -19,8 +19,10 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Install requests
-        run: pip install requests
+      # --- A CORREÇÃO ESTÁ AQUI ---
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4
+      # ----------------------------
 
       - name: Run Scraper
         run: python main.py
