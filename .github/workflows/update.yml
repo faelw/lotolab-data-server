@@ -23,7 +23,7 @@ jobs:
         run: pip install requests beautifulsoup4
 
       - name: Run Scraper
-        run: python update_jackpot.py
+        run: python main.py
 
       - name: Commit and Push
         run: |
